@@ -1,0 +1,3 @@
+cameras:
+  left: cam0
+  right: cam1 

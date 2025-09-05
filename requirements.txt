@@ -1,0 +1,12 @@
+pydantic==2.10.6
+pydantic_core==2.27.2
+numpy>=2.2.6
+numpydantic
+scipy
+pyyaml
+click
+gdown
+torch==2.8.0
+torchvision==0.23.0
+pypose
+pandas
