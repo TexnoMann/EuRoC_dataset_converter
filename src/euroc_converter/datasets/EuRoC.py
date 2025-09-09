@@ -154,10 +154,9 @@ class EuRoCDataset(BaseDataset):
                 left_camera_config=left_camera_config,
                 right_camera_config=right_camera_config,
                 align_type=self.config['depth_data']['align_type'],
-                method_config=method_config
+                method_config=method_config[method]
             )
             depth_data = {}
-            print(cam_cfg_by_side)
         
             left_image_paths = self.color_data[cam_cfg_by_side['left']]["path"]
             right_image_paths = self.color_data[cam_cfg_by_side['right']]["path"]

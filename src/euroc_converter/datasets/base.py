@@ -41,3 +41,9 @@ class BaseDataset(Dataset):
     
     def __getitem__(self, index):
         raise NotImplementedError()
+    
+def as_intrinsics_matrix(camera_config: CameraConfig) -> np.ndarray:
+    return np.array([
+        [camera_config.fx, 0.0, camera_config.cx],
+        [0.0, camera_config.fy , camera_config.cy],
+        [0.0, 0.0, 1.0]])
