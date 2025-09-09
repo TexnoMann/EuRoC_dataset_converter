@@ -1,0 +1,12 @@
+stereo_opencv:
+  block_size: 5
+  num_disparities: 16
+  pre_filter_cap: 31
+  min_disparity: 0
+  uniqueness_ratio: 15
+  speckle_window_size: 100
+  speckle_range: 32
+  disp12_max_diff: -1
+  mode: 1  # 0: STEREO_SGBM_MODE_SGBM_3WAY, 1: STEREO_SGBM_MODE_HH
+  disparity_wls_filter_lambda: 80000
+  disparity_wls_filter_sigma: 1.2

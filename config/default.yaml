@@ -1,3 +1,8 @@
 cameras:
   cam0: left
   cam1: right 
+depth_data:
+  align_type: left
+  method: 
+    name: stereo_opencv
+    config_path: config/default_depth_estimation.yaml

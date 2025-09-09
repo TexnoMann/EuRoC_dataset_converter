@@ -9,6 +9,8 @@ import pandas as pd
 import pypose as pp
 import torch
 import yaml
+import cv2
+
 
 class EuRoCDataset(BaseDataset):
     def __init__(self, cfg, basedir):
@@ -88,10 +90,10 @@ class EuRoCDataset(BaseDataset):
         self.tstamp_gt, self.gt_poses = self.__parse_gt(self.basedir)
         
         # Parse color images:
-        self.color_data = self.__parse_color_data(self.basedir)
+        self.color_data = self.__parse_color_data()
 
         # Generate depth:
-        self.depth_data = self.__generate_depth_data(self.basedir, self.config['depth_data'])
+        self.depth_data = self.__generate_depth_data(self.config['depth_data'])
     
     def __parse_gt(self, basedir):
         """ read ground truth into list data """
@@ -120,70 +122,58 @@ class EuRoCDataset(BaseDataset):
         for cam_name in self.cameras.keys():
             print(f"Reading data for source: {cam_name}")
             color_info_path = self.basedir/cam_name/"data.csv" 
-            color_data = pd.read_csv(color_info_path)
-            color_data[self.config['cameras'][cam_name]] = {}
-            color_data[self.config['cameras'][cam_name]]["time"] = color_data['#timestamp [ns]'].to_numpy()*1e-9
-            color_data[self.config['cameras'][cam_name]]["path"] = color_data['filename'].to_list()
+            readed_color_data = pd.read_csv(color_info_path)
+            color_data[cam_name] = {}
+            color_data[cam_name]["time"] = readed_color_data['#timestamp [ns]'].to_numpy()*1e-9
+            color_data[cam_name]["path"] = readed_color_data['filename'].tolist()
         return color_data
     
     def __generate_depth_data(self, method: str):
 
+        method = self.config['depth_data']['method']['name']
+        print(f"Generating depth data using method: {method} ...")
 
-    def parse(self):
-        """ read data in euroc format """
+        method_config = pathlib.Path(self.config['depth_data']['method']['config_path'])
+        try:
+            with open(method_config, 'r') as file:
+                method_config = yaml.safe_load(file)
+        except FileNotFoundError:
+            print(f"Depth generation method config not found by path: '{method_config}'.")
+        except yaml.YAMLError as e:
+            print(f"Error parsing YAML: {e}")
+            exit()
 
-        # Parse gt:
-        self.tstamp_gt, self.gt_poses = self.__parse_gt(self.basedir)
+        if method == 'stereo_opencv':
+            from euroc_converter.depth_generation.opencv_generator import OpenCV_DepthGenerator
+            cam_cfg_by_side = {}
+            for cam_names in self.config['cameras'].keys():
+                cam_cfg_by_side[self.config['cameras'][cam_names]] = cam_names
+            left_camera_config = self.cameras[cam_cfg_by_side['left']]
+            right_camera_config = self.cameras[cam_cfg_by_side['right']]
+            depth_generator = OpenCV_DepthGenerator(
+                left_camera_config=left_camera_config,
+                right_camera_config=right_camera_config,
+                align_type=self.config['depth_data']['align_type'],
+                method_config=method_config
+            )
+            depth_data = {}
+            print(cam_cfg_by_side)
         
-        # Parse images:
-        image_data = {}
-        for cam_name in self.cameras.keys():
-            print(f"Reading data for source: {cam_name}")
-            color_info_path = self.basedir/cam_name/"data.csv" 
-            color_data = pd.read_csv(color_info_path)
-            image_data[self.config['cameras'][cam_name]] = {}
-            image_data[self.config['cameras'][cam_name]]["time"] = color_data['#timestamp [ns]'].to_numpy()*1e-9
-            image_data[self.config['cameras'][cam_name]]["path"] = color_data['filename'].to_list()
-        print(image_data)
+            left_image_paths = self.color_data[cam_cfg_by_side['left']]["path"]
+            right_image_paths = self.color_data[cam_cfg_by_side['right']]["path"]
+            num_images = min(len(left_image_paths), len(right_image_paths))
+            for i in range(num_images):
+                left_image_path = self.basedir/cam_cfg_by_side['left']/'data'/left_image_paths[i]
+                right_image_path = self.basedir/cam_cfg_by_side['right']/'data'/right_image_paths[i]
+                left_image = cv2.imread(str(left_image_path))
+                right_image = cv2.imread(str(right_image_path))
+                depth_map = depth_generator.generate_depth(left_image, right_image)
+                depth_data[i] = depth_map
+            return depth_data
+        else:
+            print(f"Depth generation method '{method}' not supported.")
+            exit()
 
-        # image_data = self.parse_list(image_list)
-        # depth_data = self.parse_list(depth_list)
-        # pose_data = self.parse_list(pose_list, skiprows=1)
-        # pose_vecs = pose_data[:, 1:].astype(np.float64)
-
-        # tstamp_image = image_data[:, 0].astype(np.float64)
-        # tstamp_depth = depth_data[:, 0].astype(np.float64)
-        # tstamp_pose = pose_data[:, 0].astype(np.float64)
-
-        # associations = self.associate_frames(
-        #     tstamp_image, tstamp_depth, tstamp_pose)
-
-        # indicies = [0]
-        # for i in range(1, len(associations)):
-        #     t0 = tstamp_image[associations[indicies[-1]][0]]
-        #     t1 = tstamp_image[associations[i][0]]
-        #     if t1 - t0 > 1.0 / frame_rate:
-        #         indicies += [i]
-
-        # images, poses, depths, intrinsics = [], [], [], []
-        # inv_pose = None
-        # for ix in indicies:
-        #     (i, j, k) = associations[ix]
-        #     images += [os.path.join(datapath, image_data[i, 1])]
-        #     depths += [os.path.join(datapath, depth_data[j, 1])]
-        #     c2w = self.pose_matrix_from_quaternion(pose_vecs[k])
-        #     # if inv_pose is None:
-        #     #     inv_pose = np.linalg.inv(c2w)
-        #     #     c2w = np.eye(4)
-        #     # else:
-        #     #     c2w = inv_pose@c2w
-        #     c2w[:3, 1] *= -1
-        #     c2w[:3, 2] *= -1
-        #     c2w = torch.from_numpy(c2w).float()
-        #     poses += [c2w]
-
-        # return images, depths, poses
-    
     def __len__(self):
         return self.num_frames
     
