@@ -103,7 +103,7 @@ def create_disparity_with_rectification(
     # _, non_zeros_mask = cv2.threshold(left_disp, 3, 255, cv2.THRESH_BINARY)
     # non_zeros_mask = np.array(non_zeros_mask, dtype="uint8")
     # filtered_disp = cv2.bitwise_and(filtered_disp,filtered_disp, mask = non_zeros_mask)
-
+    confidence_map = None
     if filtration_method == 'median':
         filtered_disp = cv2.medianBlur(left_disp, 5)
         # _, non_zeros_mask = cv2.threshold(left_disp, 3, 255, cv2.THRESH_BINARY)
@@ -119,15 +119,26 @@ def create_disparity_with_rectification(
         wls_filter.setSigmaColor(disparityWLSFilter_sigma)
 
         filtered_disp = wls_filter.filter(left_disp, img_left_gray, disparity_map_right=right_disp)
-        # confidence_map = wls_filter.getConfidenceMap()
+        confidence_map = wls_filter.getConfidenceMap()
 
     filtered_disp = filtered_disp.astype(np.float32) / 16.0
-    print(left_disp.shape, filtered_disp.shape, np.min(filtered_disp), np.max(filtered_disp), np.min(left_disp), np.max(left_disp))
-
     depth = np.array(cv2.reprojectImageTo3D(filtered_disp, Q)[:,:, 2])
-    print(depth.dtype)
-    # confidence_mask = confidence_map < 255*method_config.get('min_confidence', 0.95)
-    # depth[confidence_mask] = 0.0
+    if method_config.get('filter_by_confidence', False):
+        if confidence_map is None:
+            disparityWLSFilter_lambda = method_config.get('disparity_wls_filter_lambda', 80000.0)
+            disparityWLSFilter_sigma = method_config.get('disparity_wls_filter_sigma', 1.8)
+            wls_filter = cv2.ximgproc.createDisparityWLSFilter(left_matcher)
+            wls_filter.setLambda(disparityWLSFilter_lambda)
+            wls_filter.setSigmaColor(disparityWLSFilter_sigma)
+
+            _ = wls_filter.filter(left_disp, img_left_gray, disparity_map_right=right_disp)
+            confidence_map = wls_filter.getConfidenceMap()
+        
+        depth[confidence_map < 255*method_config.get('min_confidence', 0.95)]
+    depth[depth < method_config.get('min_depth', 0.0)] = 0.0
+    depth[depth > method_config.get('max_depth', 20.0)] = 0.0
+
+   
     # depth[confidence_map < method_config.get('min_depth', 0.0)] = 0.0
     # depth[confidence_map > method_config.get('max_depth', 20.0)] = 0.0
     # 10. Normalize and visualize the results
