@@ -66,7 +66,6 @@ def create_disparity_with_rectification(
     # 4. Compute undistortion and rectification maps
     map1x, map1y = cv2.initUndistortRectifyMap(cam0_intrinsics, cam0_distortion, R1, P1, (image_size[1], image_size[0]), cv2.CV_32FC1)
     map2x, map2y = cv2.initUndistortRectifyMap(cam1_intrinsics, cam1_distortion, R2, P2, (image_size[1], image_size[0]), cv2.CV_32FC1)
-    print(roi1, roi2)
 
     # 5. Apply remapping to get the rectified images
     img_left_rectified = cv2.remap(left_image, map1x, map1y, cv2.INTER_LINEAR)
@@ -95,8 +94,8 @@ def create_disparity_with_rectification(
     right_matcher = cv2.ximgproc.createRightMatcher(left_matcher)
 
     # 7. Compute the raw left and right disparity maps from rectified images
-    left_disp = left_matcher.compute(img_left_gray, img_right_gray).astype(np.float32) / 16.0
-    right_disp = right_matcher.compute(img_right_gray, img_left_gray).astype(np.float32) / 16.0
+    left_disp = left_matcher.compute(img_left_gray, img_right_gray)
+    right_disp = right_matcher.compute(img_right_gray, img_left_gray)
     
     filtration_method = method_config.get('disparity_filter', 'median')
     filtered_disp = left_disp
@@ -122,7 +121,8 @@ def create_disparity_with_rectification(
         filtered_disp = wls_filter.filter(left_disp, img_left_gray, disparity_map_right=right_disp)
         # confidence_map = wls_filter.getConfidenceMap()
 
-
+    filtered_disp = filtered_disp.astype(np.float32) / 16.0
+    print(left_disp.shape, filtered_disp.shape, np.min(filtered_disp), np.max(filtered_disp), np.min(left_disp), np.max(left_disp))
 
     depth = np.array(cv2.reprojectImageTo3D(filtered_disp, Q)[:,:, 2])
     print(depth.dtype)
