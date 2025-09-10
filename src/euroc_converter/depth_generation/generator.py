@@ -8,8 +8,8 @@ import numpy as np
 from typing import Tuple
 
 class DepthAlignType(Enum):
-    LEFT = auto()
-    RIGHT = auto()
+    LEFT = 'left'
+    RIGHT = 'right'
 
 class BaseDepthGenerator:
     

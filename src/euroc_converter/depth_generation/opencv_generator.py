@@ -18,6 +18,8 @@ class OpenCV_DepthGenerator(BaseDepthGenerator):
         method_config: dict = None
     ):
         super().__init__(left_camera_config, right_camera_config, align_type, method_config)
+        if self.align_type is DepthAlignType.RIGHT:
+            raise NotImplementedError
 
     def generate_depth(self, left_image: cv2.Mat, right_image: cv2.Mat)-> Tuple[np.ndarray, np.ndarray, Tuple]:
         depth, confidence_map, valid_disp_roi = create_depth_with_rectification(

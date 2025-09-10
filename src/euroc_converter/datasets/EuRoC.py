@@ -10,16 +10,22 @@ import pypose as pp
 import torch
 import yaml
 import cv2
+from PIL import Image
+import tqdm
+from euroc_converter.depth_generation.generator import BaseDepthGenerator, DepthAlignType
 
 import matplotlib
 matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
+import os, shutil
+
 
 class EuRoCDataset(BaseDataset):
     def __init__(self, cfg, basedir):
         self.config = cfg
         self.basedir = pathlib.Path(basedir)/'mav0'
+        self.basedir_extended = pathlib.Path(basedir)/'mav0_ext'
         if not self.basedir.exists():
             print("Given basedir path invalid, please provide path to parent ov 'mav0' directory")
             exit()
@@ -89,7 +95,13 @@ class EuRoCDataset(BaseDataset):
 
     def parse(self):
         """ read data in euroc format """
-
+        if not self.basedir_extended.exists():
+            self.basedir_extended.mkdir(parents=True, exist_ok=True)
+        else:
+            rewrite = input("Do you want to rewrite exist extended euroc dataset? [y/n]")
+            if rewrite:
+                shutil.rmtree(str(self.basedir_extended))
+                self.basedir_extended.mkdir(parents=True, exist_ok=True)
         # Parse gt:
         self.tstamp_gt, self.gt_poses = self.__parse_gt(self.basedir)
         self.num_frames = len(self.tstamp_gt)
@@ -158,36 +170,44 @@ class EuRoCDataset(BaseDataset):
             depth_generator = OpenCV_DepthGenerator(
                 left_camera_config=left_camera_config,
                 right_camera_config=right_camera_config,
-                align_type=self.config['depth_data']['align_type'],
+                align_type=DepthAlignType(self.config['depth_data']['align_type']),
                 method_config=method_config[method]
             )
             
-            depth_data = {}
+            depth_images = {}
             confidence_maps = {}
-        
+            color_images = {}
             left_image_paths = self.color_data[cam_cfg_by_side['left']]["path"]
             right_image_paths = self.color_data[cam_cfg_by_side['right']]["path"]
             num_images = min(len(left_image_paths), len(right_image_paths))
-            for i in range(num_images):
+            for i in tqdm.tqdm(range(num_images)):
                 left_image_path = self.basedir/cam_cfg_by_side['left']/'data'/left_image_paths[i]
                 right_image_path = self.basedir/cam_cfg_by_side['right']/'data'/right_image_paths[i]
                 left_image = cv2.imread(str(left_image_path))
                 right_image = cv2.imread(str(right_image_path))
                 depth_map, confidence, roi = depth_generator.generate_depth(left_image, right_image)
-                
-                plt.imshow(depth_map)
-                plt.show()
+                # plt.imshow(depth_map)
+                # plt.show()
                 depth_map = depth_map[int(roi[1]):int(roi[1]+roi[3]), int(roi[0]):int(roi[0]+roi[2])]
-                left_image = left_image[int(roi[1]):int(roi[1]+roi[3]), int(roi[0]):int(roi[0]+roi[2])]
-                right_image = right_image[int(roi[1]):int(roi[1]+roi[3]), int(roi[0]):int(roi[0]+roi[2])]
-                plt.imshow(depth_map)
-                plt.show()
-
-
-                depth_data[i] = depth_map
+                if depth_generator.align_type is DepthAlignType.LEFT:
+                    color_image = left_image[int(roi[1]):int(roi[1]+roi[3]), int(roi[0]):int(roi[0]+roi[2])]
+                    (self.basedir_extended/cam_cfg_by_side['left']/'data').mkdir(exist_ok=True, parents=True)
+                    cv2.imwrite(
+                        self.basedir_extended/cam_cfg_by_side['left']/'data'/self.color_data[cam_cfg_by_side['left']]["path"][i],
+                        color_image
+                    )
+                else: 
+                    color_image = right_image[int(roi[1]):int(roi[1]+roi[3]), int(roi[0]):int(roi[0]+roi[2])]
+                    (self.basedir_extended/cam_cfg_by_side['right']/'data').mkdir(exist_ok=True, parents=True)
+                    cv2.imwrite(
+                        self.basedir_extended/cam_cfg_by_side['right']/'data'/self.color_data[cam_cfg_by_side['right']]["path"][i], 
+                        color_image
+                    )
+                depth_images[i] = depth_map
                 confidence_maps[i] = confidence
+                
 
-            return depth_data
+            return depth_data, confidence_maps, color_data
         else:
             print(f"Depth generation method '{method}' not supported.")
             exit()
