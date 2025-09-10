@@ -1,19 +1,17 @@
 import cv2
-import matplotlib
-matplotlib.use('TkAgg')
-import matplotlib.pyplot as plt
-import matplotlib.image as mpimg
+
 import numpy as np
 import os
 from euroc_converter.datasets.base import CameraConfig, as_intrinsics_matrix
+from typing import Tuple
 
-def create_disparity_with_rectification(
+def create_depth_with_rectification(
     left_image: cv2.Mat, 
     right_image: cv2.Mat, 
     left_camera_config: CameraConfig, 
     right_camera_config: CameraConfig,
     method_config: dict = None
-):
+) -> Tuple[np.ndarray, np.ndarray, Tuple]:
     """
     Computes and filters a disparity map using rectified stereo images.
 
@@ -61,7 +59,6 @@ def create_disparity_with_rectification(
         alpha=-1
     )
     valid_disp_roi = cv2.getValidDisparityROI(roi1, roi2, method_config.get('min_disparity', 0), method_config.get('num_disparities', 128), method_config.get('block_size', 5)) 
-
     
     # 4. Compute undistortion and rectification maps
     map1x, map1y = cv2.initUndistortRectifyMap(cam0_intrinsics, cam0_distortion, R1, P1, (image_size[1], image_size[0]), cv2.CV_32FC1)
@@ -96,19 +93,13 @@ def create_disparity_with_rectification(
     # 7. Compute the raw left and right disparity maps from rectified images
     left_disp = left_matcher.compute(img_left_gray, img_right_gray)
     right_disp = right_matcher.compute(img_right_gray, img_left_gray)
+    filtered_disp = left_disp
     
     filtration_method = method_config.get('disparity_filter', 'median')
-    filtered_disp = left_disp
 
-    # _, non_zeros_mask = cv2.threshold(left_disp, 3, 255, cv2.THRESH_BINARY)
-    # non_zeros_mask = np.array(non_zeros_mask, dtype="uint8")
-    # filtered_disp = cv2.bitwise_and(filtered_disp,filtered_disp, mask = non_zeros_mask)
     confidence_map = None
     if filtration_method == 'median':
-        filtered_disp = cv2.medianBlur(left_disp, 5)
-        # _, non_zeros_mask = cv2.threshold(left_disp, 3, 255, cv2.THRESH_BINARY)
-        # non_zeros_mask = np.array(non_zeros_mask, dtype="uint8")
-        # filtered_disp = cv2.bitwise_and(filtered_disp,filtered_disp, mask = non_zeros_mask)
+        filtered_disp = cv2.medianBlur(left_disp, method_config.get('disparity_media_filter_window', 5))
         
     elif filtration_method == 'wls':
         # 8. Create and configure the DisparityWLSFilter
@@ -135,30 +126,8 @@ def create_disparity_with_rectification(
             confidence_map = wls_filter.getConfidenceMap()
         
         depth[confidence_map < 255*method_config.get('min_confidence', 0.95)]
+        
     depth[depth < method_config.get('min_depth', 0.0)] = 0.0
     depth[depth > method_config.get('max_depth', 20.0)] = 0.0
 
-   
-    # depth[confidence_map < method_config.get('min_depth', 0.0)] = 0.0
-    # depth[confidence_map > method_config.get('max_depth', 20.0)] = 0.0
-    # 10. Normalize and visualize the results
-    print(np.max(filtered_disp))
-    def normalize(disp):
-        return cv2.normalize(disp, disp, alpha=255, beta=0, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-
-    raw_disp_vis = normalize(left_disp)
-    filtered_disp_vis = normalize(filtered_disp)
-    # print(depth.shape, confidence_map.shape)
-    # confidence_map[confidence_map < 255*method_config.get('min_confidence', 0.95)] = 0.0
-    plt.imshow(depth)
-
-    # Show the plot
-    plt.show()
-    # depth_vis = normalize(cv2.Mat(depth))
-    # Display the images
-    cv2.imshow('Left Rectified Image', img_left_rectified)
-    cv2.imshow('Raw Disparity (Rectified)', raw_disp_vis)
-    cv2.imshow('Filtered Disparity (Rectified)', filtered_disp_vis)
-    plt.show()
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+    return depth, confidence_map, valid_disp_roi

@@ -2,6 +2,7 @@ cameras:
   cam0: left
   cam1: right 
 depth_data:
+  save: True
   align_type: left
   method: 
     name: stereo_opencv

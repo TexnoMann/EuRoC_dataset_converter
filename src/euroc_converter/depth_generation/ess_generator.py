@@ -30,11 +30,4 @@ class ESS_ISAAC_DepthGenerator(BaseDepthGenerator):
         subprocess.run('')
 
     def generate_depth(self, left_image: cv2.Mat, right_image: cv2.Mat) -> cv2.Mat:
-        # Run a container and get its output
-        # This is similar to 'docker run alpine echo hello world'
-        result = self.docker_client.containers.run('alpine', 'echo hello world')
-        print(result.decode('utf-8')) # Decode the bytes output to a string
-
-        # Run a container in detached mode (similar to 'docker run -d')
-        # This returns a Container object immediately
-        container = self.docker_client.containers.run('bfirsh/reticulate-splines', detach=True)
+        pass

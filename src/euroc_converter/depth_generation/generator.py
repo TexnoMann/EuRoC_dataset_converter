@@ -4,6 +4,8 @@ from abc import ABC, abstractmethod
 from euroc_converter.datasets.base import CameraConfig
 from enum import Enum, auto
 import cv2
+import numpy as np
+from typing import Tuple
 
 class DepthAlignType(Enum):
     LEFT = auto()
@@ -23,5 +25,5 @@ class BaseDepthGenerator:
         self.method_config = method_config
 
     @abstractmethod
-    def generate_depth(self, left_image: cv2.Mat, right_image: cv2.Mat) -> cv2.Mat:
+    def generate_depth(self, left_image: cv2.Mat, right_image: cv2.Mat) -> Tuple[np.ndarray, np.ndarray, Tuple]:
         pass

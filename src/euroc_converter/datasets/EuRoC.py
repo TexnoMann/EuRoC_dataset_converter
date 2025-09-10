@@ -11,6 +11,10 @@ import torch
 import yaml
 import cv2
 
+import matplotlib
+matplotlib.use('TkAgg')
+import matplotlib.pyplot as plt
+import matplotlib.image as mpimg
 
 class EuRoCDataset(BaseDataset):
     def __init__(self, cfg, basedir):
@@ -88,12 +92,13 @@ class EuRoCDataset(BaseDataset):
 
         # Parse gt:
         self.tstamp_gt, self.gt_poses = self.__parse_gt(self.basedir)
+        self.num_frames = len(self.tstamp_gt)
         
         # Parse color images:
         self.color_data = self.__parse_color_data()
 
         # Generate depth:
-        self.depth_data = self.__generate_depth_data(self.config['depth_data'])
+        self.depth_data, self.confidence_maps = self.__generate_depth_data(self.config['depth_data'])
     
     def __parse_gt(self, basedir):
         """ read ground truth into list data """
@@ -156,7 +161,9 @@ class EuRoCDataset(BaseDataset):
                 align_type=self.config['depth_data']['align_type'],
                 method_config=method_config[method]
             )
+            
             depth_data = {}
+            confidence_maps = {}
         
             left_image_paths = self.color_data[cam_cfg_by_side['left']]["path"]
             right_image_paths = self.color_data[cam_cfg_by_side['right']]["path"]
@@ -166,8 +173,20 @@ class EuRoCDataset(BaseDataset):
                 right_image_path = self.basedir/cam_cfg_by_side['right']/'data'/right_image_paths[i]
                 left_image = cv2.imread(str(left_image_path))
                 right_image = cv2.imread(str(right_image_path))
-                depth_map = depth_generator.generate_depth(left_image, right_image)
+                depth_map, confidence, roi = depth_generator.generate_depth(left_image, right_image)
+                
+                plt.imshow(depth_map)
+                plt.show()
+                depth_map = depth_map[int(roi[1]):int(roi[1]+roi[3]), int(roi[0]):int(roi[0]+roi[2])]
+                left_image = left_image[int(roi[1]):int(roi[1]+roi[3]), int(roi[0]):int(roi[0]+roi[2])]
+                right_image = right_image[int(roi[1]):int(roi[1]+roi[3]), int(roi[0]):int(roi[0]+roi[2])]
+                plt.imshow(depth_map)
+                plt.show()
+
+
                 depth_data[i] = depth_map
+                confidence_maps[i] = confidence
+
             return depth_data
         else:
             print(f"Depth generation method '{method}' not supported.")
@@ -175,68 +194,3 @@ class EuRoCDataset(BaseDataset):
 
     def __len__(self):
         return self.num_frames
-    
-    def __getitem__(self, index):
-        color_left_path = self.color_left_paths[index]
-        color_right_path = self.color_left_paths[index]
-        # depth_path = self.depth_paths[index]
-
-        color_data = cv2.imread(color_path)
-        if '.png' in depth_path:
-            depth_data = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)
-        elif '.exr' in depth_path:
-            raise NotImplementedError()
-        if self.distortion is not None:
-            K = as_intrinsics_matrix([self.config['cam']['fx'], 
-                                      self.config['cam']['fy'],
-                                      self.config['cam']['cx'], 
-                                      self.config['cam']['cy']])
-            color_data = cv2.undistort(color_data, K, self.distortion)
-        
-        color_data = cv2.cvtColor(color_data, cv2.COLOR_BGR2RGB)
-        color_data = color_data / 255.
-        depth_data = depth_data.astype(np.float32) / self.png_depth_scale * self.sc_factor
-
-        H, W = depth_data.shape
-        color_data = cv2.resize(color_data, (W, H))
-
-        if self.downsample_factor > 1:
-            H = H // self.downsample_factor
-            W = W // self.downsample_factor
-            self.fx = self.fx // self.downsample_factor
-            self.fy = self.fy // self.downsample_factor
-            color_data = cv2.resize(color_data, (W, H), interpolation=cv2.INTER_AREA)
-            depth_data = cv2.resize(depth_data, (W, H), interpolation=cv2.INTER_NEAREST)  
-
-        if self.rays_d is None:
-            self.rays_d =get_camera_rays(self.H, self.W, self.fx, self.fy, self.cx, self.cy)
-
-
-        color_data = torch.from_numpy(color_data.astype(np.float32))
-        depth_data = torch.from_numpy(depth_data.astype(np.float32))
-
-        if self.crop_size is not None:
-            # follow the pre-processing step in lietorch, actually is resize
-            color_data = color_data.permute(2, 0, 1)
-            color_data = F.interpolate(
-                color_data[None], self.crop_size, mode='bilinear', align_corners=True)[0]
-            depth_data = F.interpolate(
-                depth_data[None, None], self.crop_size, mode='nearest')[0, 0]
-            color_data = color_data.permute(1, 2, 0).contiguous()
-        
-        edge = self.config['cam']['crop_edge']
-        if edge > 0:
-            # crop image edge, there are invalid value on the edge of the color image
-            color_data = color_data[edge:-edge, edge:-edge]
-            depth_data = depth_data[edge:-edge, edge:-edge]
-        
-
-
-        ret = {
-            "frame_id": self.frame_ids[index],
-            "c2w":  self.poses[index],
-            "rgb": color_data,
-            "depth": depth_data,
-            "direction": self.rays_d
-        }
-        return ret
