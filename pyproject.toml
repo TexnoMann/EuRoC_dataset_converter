@@ -20,7 +20,8 @@ dependencies = [
     "torchvision==0.23.0",
     "pypose",
     "pandas",
-    "opencv-contrib-python"
+    "opencv-contrib-python",
+    "pillow",
 ]
 
 license = { file = "LICENSE" }

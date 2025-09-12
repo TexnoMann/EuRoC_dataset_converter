@@ -2,7 +2,7 @@ import cv2
 
 import numpy as np
 import os
-from euroc_converter.datasets.base import CameraConfig, as_intrinsics_matrix
+from euroc_converter.datasets.base import CameraConfig, from_camera_config_to_intrinsics_matrix
 from typing import Tuple
 
 def create_depth_with_rectification(
@@ -30,8 +30,8 @@ def create_depth_with_rectification(
     # avoiding black borders. `alpha=0` shows all pixels.
     # `newImageSize` is set to the original image size.
 
-    cam0_intrinsics = as_intrinsics_matrix(left_camera_config)
-    cam1_intrinsics = as_intrinsics_matrix(right_camera_config)
+    cam0_intrinsics = from_camera_config_to_intrinsics_matrix(left_camera_config)
+    cam1_intrinsics = from_camera_config_to_intrinsics_matrix(right_camera_config)
 
     R_cam0 = left_camera_config.extrinsics[:3, :3]
     T_cam0 = left_camera_config.extrinsics[:3, 3]

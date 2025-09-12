@@ -4,7 +4,11 @@ import os
 import re
 import pathlib
 import numpy as np
-from .base import BaseDataset, CameraConfig, IMUConfig
+from .base import (
+    BaseDataset, CameraConfig, IMUConfig, 
+    from_dict_to_camera_config, from_dict_to_imu_config,
+    from_camera_config_to_dict, from_imu_config_to_dict
+)
 import pandas as pd
 import pypose as pp
 import torch
@@ -19,6 +23,8 @@ matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 import os, shutil
+
+import copy
 
 
 class EuRoCDataset(BaseDataset):
@@ -41,18 +47,7 @@ class EuRoCDataset(BaseDataset):
             except yaml.YAMLError as e:
                 print(f"Error parsing YAML: {e}")
                 exit()
-            self.cameras[cam_name] = CameraConfig(
-                rate_hz = cam_cfg['rate_hz'],
-                H = cam_cfg['resolution'][1],
-                W = cam_cfg['resolution'][0],
-                fx = cam_cfg['intrinsics'][0],
-                fy = cam_cfg['intrinsics'][1],
-                cx = cam_cfg['intrinsics'][2],
-                cy = cam_cfg['intrinsics'][3],
-                distortion_model = cam_cfg['distortion_model'],
-                distortion_coefficients = np.array(cam_cfg['distortion_coefficients']),
-                extrinsics = np.array(cam_cfg['T_BS']['data']).reshape((4, 4))
-            )
+            self.cameras[cam_name] = from_dict_to_camera_config(cam_cfg)
             print(f"- Parsed {self.config['cameras'][cam_name]} ('{cam_name}') camera config:\n {str(self.cameras[cam_name])}")
         imu_config_path = self.basedir/"imu0/sensor.yaml"
         try:
@@ -64,14 +59,7 @@ class EuRoCDataset(BaseDataset):
             print(f"Error parsing YAML: {e}")
             exit()  
         
-        self.imu = IMUConfig(
-            rate_hz = imu_cfg['rate_hz'],
-            gyroscope_noise_density = imu_cfg['gyroscope_noise_density'],
-            gyroscope_random_walk = imu_cfg['gyroscope_random_walk'],
-            accelerometer_noise_density = imu_cfg['accelerometer_noise_density'],
-            accelerometer_random_walk = imu_cfg['accelerometer_random_walk'],
-            extrinsics = np.array(imu_cfg['T_BS']['data']).reshape((4, 4))
-        )
+        self.imu = from_dict_to_imu_config(imu_cfg)
         print(f"- Parsed imu config:\n {str(self.imu)}")
     
     def associate_frames(self, tstamp_images, tstamp_imu, tstamp_gt, max_dt=0.075):
@@ -110,7 +98,7 @@ class EuRoCDataset(BaseDataset):
         self.color_data = self.__parse_color_data()
 
         # Generate depth:
-        self.depth_data, self.confidence_maps = self.__generate_depth_data(self.config['depth_data'])
+        self.tstamp_depth, self.depth_data = self.__extend_dataset_by_depth(self.config['depth_data'])
     
     def __parse_gt(self, basedir):
         """ read ground truth into list data """
@@ -145,7 +133,7 @@ class EuRoCDataset(BaseDataset):
             color_data[cam_name]["path"] = readed_color_data['filename'].tolist()
         return color_data
     
-    def __generate_depth_data(self, method: str):
+    def __extend_dataset_by_depth(self, method: str):
 
         method = self.config['depth_data']['method']['name']
         print(f"Generating depth data using method: {method} ...")
@@ -170,16 +158,19 @@ class EuRoCDataset(BaseDataset):
             depth_generator = OpenCV_DepthGenerator(
                 left_camera_config=left_camera_config,
                 right_camera_config=right_camera_config,
-                align_type=DepthAlignType(self.config['depth_data']['align_type']),
+                align_type=DepthAlignType.LEFT,
                 method_config=method_config[method]
             )
             
-            depth_images = {}
-            confidence_maps = {}
-            color_images = {}
             left_image_paths = self.color_data[cam_cfg_by_side['left']]["path"]
             right_image_paths = self.color_data[cam_cfg_by_side['right']]["path"]
             num_images = min(len(left_image_paths), len(right_image_paths))
+            crop_roi = None
+            
+            (self.basedir_extended/cam_cfg_by_side['left']/'data').mkdir(exist_ok=True, parents=True)
+            # Save depth image:
+            (self.basedir_extended/'depth'/'data').mkdir(exist_ok=True, parents=True)
+
             for i in tqdm.tqdm(range(num_images)):
                 left_image_path = self.basedir/cam_cfg_by_side['left']/'data'/left_image_paths[i]
                 right_image_path = self.basedir/cam_cfg_by_side['right']/'data'/right_image_paths[i]
@@ -188,29 +179,73 @@ class EuRoCDataset(BaseDataset):
                 depth_map, confidence, roi = depth_generator.generate_depth(left_image, right_image)
                 # plt.imshow(depth_map)
                 # plt.show()
+                if crop_roi is None:
+                    crop_roi = roi
                 depth_map = depth_map[int(roi[1]):int(roi[1]+roi[3]), int(roi[0]):int(roi[0]+roi[2])]
-                if depth_generator.align_type is DepthAlignType.LEFT:
-                    color_image = left_image[int(roi[1]):int(roi[1]+roi[3]), int(roi[0]):int(roi[0]+roi[2])]
-                    (self.basedir_extended/cam_cfg_by_side['left']/'data').mkdir(exist_ok=True, parents=True)
-                    cv2.imwrite(
-                        self.basedir_extended/cam_cfg_by_side['left']/'data'/self.color_data[cam_cfg_by_side['left']]["path"][i],
-                        color_image
-                    )
-                else: 
-                    color_image = right_image[int(roi[1]):int(roi[1]+roi[3]), int(roi[0]):int(roi[0]+roi[2])]
-                    (self.basedir_extended/cam_cfg_by_side['right']/'data').mkdir(exist_ok=True, parents=True)
-                    cv2.imwrite(
-                        self.basedir_extended/cam_cfg_by_side['right']/'data'/self.color_data[cam_cfg_by_side['right']]["path"][i], 
-                        color_image
-                    )
-                depth_images[i] = depth_map
-                confidence_maps[i] = confidence
-                
+                image_filename = None
 
-            return depth_data, confidence_maps, color_data
+                image_filename = self.color_data[cam_cfg_by_side['left']]["path"][i]
+                left_image = left_image[int(roi[1]):int(roi[1]+roi[3]), int(roi[0]):int(roi[0]+roi[2])]
+            
+                cv2.imwrite(
+                    self.basedir_extended/cam_cfg_by_side['left']/'data'/image_filename,
+                    left_image
+                )
+            
+                depth_map = (depth_map*self.config['depth_data']['png_depth_scale']).astype(np.uint32)
+                depth_image = Image.fromarray(depth_map)
+                depth_image.save(self.basedir_extended/'depth'/'data'/image_filename)
+            
+            new_camera_config = copy.deepcopy(left_camera_config)
+            new_camera_config.cx -= crop_roi[0]
+            new_camera_config.cy -= crop_roi[1]
+
+            new_camera_config.H = depth_map.shape[0]
+            new_camera_config.W = depth_map.shape[1]
+
+            new_camera_config_dict = from_camera_config_to_dict(new_camera_config)
+            # Write fake color sensor config
+            with open(self.basedir_extended/cam_cfg_by_side['left']/'sensor.yaml', "w") as file:
+                yaml.dump(
+                    new_camera_config_dict, file, sort_keys=False, default_flow_style=False
+                )
+            
+            new_camera_config_dict.update( {
+                    'png_depth_scale': self.config['depth_data']['png_depth_scale'],
+                    'align_type': 'left'
+                }
+            )
+    
+            # Write fake depth sensor config
+            with open(self.basedir_extended/'depth'/'sensor.yaml', "w") as file:
+                yaml.dump(
+                    new_camera_config_dict, file, sort_keys=False, default_flow_style=False
+                )
+
+            shutil.copy(
+                str(self.basedir/cam_cfg_by_side['left']/'data.csv'),
+                str(self.basedir_extended/cam_cfg_by_side['left']/'data.csv')
+            )
+            shutil.copy(
+                str(self.basedir/cam_cfg_by_side['left']/'data.csv'),
+                str(self.basedir_extended/'depth'/'data.csv')
+            )
+            shutil.copytree(
+                str(self.basedir/'imu0'),
+                str(self.basedir_extended/'imu0')
+            )
+            shutil.copytree(
+                str(self.basedir/'state_groundtruth_estimate0'),
+                str(self.basedir_extended/'state_groundtruth_estimate0')
+            )
+            
+
+            tstamp_depth = self.color_data[cam_cfg_by_side['left']]["time"]
+            depth_data  = self.color_data[cam_cfg_by_side['left']]["path"]
+
+            return tstamp_depth, depth_data
         else:
-            print(f"Depth generation method '{method}' not supported.")
-            exit()
+            raise NotImplementedError(f"Depth generation method '{method}' not supported.")
 
     def __len__(self):
         return self.num_frames

@@ -7,3 +7,4 @@ depth_data:
   method: 
     name: stereo_opencv
     config_path: config/default_depth_estimation.yaml
+  png_depth_scale: 5000
